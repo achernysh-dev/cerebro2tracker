@@ -1,0 +1,8 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+tracker_structure.json
+
+# Filled sync settings may contain Tracker tokens (template ships empty).
+twin_plugin/sync_settings.json

@@ -1,0 +1,548 @@
+import cerebro
+import xml.etree.ElementTree as ET
+import platform, time, copy, json
+
+import twin_plugin.examples
+import twin_plugin.pycerebro as pycerebro
+
+from PyQt6.QtWidgets import (
+    QDialog, QLabel, QListWidget, QPushButton, QVBoxLayout, 
+    QHBoxLayout, QFormLayout, QListWidgetItem, QLineEdit, 
+    QApplication, QWidget, QStyleOptionFrame, QStyle
+)
+from PyQt6.QtCore import QEvent, Qt, QObject
+from PyQt6.QtGui import QPainter, QPalette
+from threading import *
+
+def config_read():
+    if platform.system()=='Windows': config_file = 'z:/config/config.xml'
+
+    tree = ET.parse(config_file)
+    root = tree.getroot()
+
+    dict = {}
+    for child in root.attrib:
+        dict[child]= root.attrib[child]
+    return dict
+
+
+class UpdateEvent(QEvent):
+    def __init__(self, data):
+        QEvent.__init__(self, QEvent.User)
+        self.data = data
+        
+        
+class itemThread(Thread, QWidget): 
+    def __init__(self, parent, data=0): 
+        Thread.__init__(self)
+        self.parent = parent
+        self.data = data
+        self.start()
+        
+
+    def run(self): 
+        for i in range(10):
+            time.sleep(0.5)
+            QApplication.postEvent(self.parent, UpdateEvent(1))
+
+
+dialog = None
+
+class task_obj(object):
+    def __init__(self):
+        self.name = ''
+        self.id = -1
+        self.cerebro_path=''
+        self.attribs=[]
+
+def passpot_ui():
+    # A 'Qt Dialog' main menu item activation.
+    # Displays a dialog. The main interface is blocked at the moment.        
+
+    global dialog
+
+#     class MyDialog(QDialog): # dialog class
+    class MyDialog(QDialog): # dialog class
+
+        def __init__(self, parent=None):
+            super(MyDialog, self).__init__(parent)
+#             
+#             ui_file  = "C:/Users/Chernys/Desktop/twin_plugin/uipassport_ui.ui"
+#             file = QFile(ui_file)
+#             file.open(QFile.ReadOnly)
+#             self.widget = uic.loadUi(file, self)    
+            
+            self.setWindowModality  (Qt.WindowModality.ApplicationModal)
+            
+            self.label_chars = QLabel('Characters')                
+            self.listWidget_chars= QListWidget()
+            self.button_char_plus = QPushButton('<<')                
+            self.button_char_showhide = QPushButton('Show >>')                
+            self.button_char_del = QPushButton('>>')  
+                          
+            self.button_upd_chars_cloth = QPushButton('Update chars for cloth dynamics')                
+            self.button_upd_chars_hair = QPushButton('Update chars for hair dynamics')                
+#             self.filter_chars= customLineEdit('filter names...')
+
+            self.listWidget_chars_list= QListWidget()
+            self.listWidget_chars_list.setSortingEnabled(True)
+            # self.listWidget_chars_list.sortItems(0)
+            # self.listWidget_chars_list.setSelectionMode (4)
+            # self.listWidget_chars_list.setVisible (0)
+            # self.listWidget_chars.setSortingEnabled(True)
+            # self.listWidget_chars.sortItems(0)
+            # self.listWidget_chars.setSelectionMode (4)
+            
+            vlay1 = QVBoxLayout()
+            vlay1_2 = QVBoxLayout()
+            hlay1 = QHBoxLayout()
+            vlay1.addWidget(self.button_char_plus)
+            vlay1.addWidget(self.button_char_showhide)
+            vlay1.addWidget(self.button_char_del)
+#             vlay1_2.addWidget(self.filter_chars)
+            vlay1_2.addWidget(self.listWidget_chars_list)
+            hlay1.addWidget(self.listWidget_chars)
+            hlay1.addLayout(vlay1)
+            hlay1.addLayout(vlay1_2)
+                            
+                            
+            self.label_env = QLabel('Env set')                
+            self.listWidget_env= QListWidget()                
+#             label.setAlignment(Qt.AlignCenter)            
+            
+            mainLayout = QFormLayout()
+            mainLayout.addRow(self.label_chars, hlay1)
+            mainLayout.addRow(None, self.button_upd_chars_cloth)
+            mainLayout.addRow(None, self.button_upd_chars_hair)
+#             mainLayout.addRow(self.label_env, hlay2)
+#             mainLayout.addWidget(label, 0, 0)
+#             mainLayout.addWidget(button, 1, 0)
+#             mainLayout.addWidget(self.widget, 2, 0)
+            
+            
+#             self.db = twin_plugin.examples.action.db_init()
+            
+            self.setLayout(mainLayout)
+            # self.button_char_plus.clicked.connect ( self.add_char)
+            # self.button_char_del.clicked.connect ( self.remove_char)
+            # self.button_char_showhide.clicked.connect ( self.chars_showhide)
+            
+            # self.button_upd_chars_cloth.clicked.connect ( self.update_cloth_chars_tasks)
+            # self.button_upd_chars_hair.clicked.connect ( self.update_hair_chars_tasks)
+#             QObject.connect(button, SIGNAL("clicked()"), self.button_click)
+            
+            self.charsLib = {}
+            self.refresh_chars_Flag=False
+            
+#             self.check_current_shot()   
+#             self.refresh_data()
+#             self.get_library_data()
+        
+        def update_cloth_chars_tasks(self):
+            self.update_resource_chars_tasks('dyn')
+        
+        def update_hair_chars_tasks(self):
+            self.update_resource_chars_tasks(task_type = 'hair_fur')
+        
+        def update_resource_chars_tasks(self, task_type = 'dyn'):
+            db = twin_plugin.examples.action.db_init()
+            parent_url = self.current_cerebro_task.parent_url()
+            root_task_url = '/'+parent_url.split('/')[1]
+            full_path_id = db.task_by_url(root_task_url)[0]
+            root_task = cerebro.core.task(full_path_id)
+            data = self.read_data_from_shot(root_task)
+#             cerebro.core.print_error('task_type:'  + str(task_type))
+#             cerebro.core.print_error('DATA from root task:'  + str(data))
+            
+            conn_to = []
+            conn_from = []
+            
+            for line in data['resource_tasks']:
+                name = line['name']
+                cerebro_task_url = line['cerebro_path']
+                connection_to = line['connection_to']
+                connection_from = line['connection_from']
+#                 attribs = line['attribs']
+#                 cerebro.core.print_error('line["name"]'  + str(name) + ' ' + task_type)
+                
+                if name==task_type:
+#                     cerebro.core.print_error('FOUND MATCH'  + str(name) + ' ' + task_type)
+                    cerebro.core.print_error('line["name"]'  + str(name))
+                    cerebro.core.print_error('line["cerebro_path"]'  + str(cerebro_task_url))
+                    cerebro.core.print_error('line["connection_to"]'  + str(connection_to))
+                    cerebro.core.print_error('line["connection_from"]'  + str(connection_from))
+                    
+                    type_task_id = db.task_by_url(cerebro_task_url)[0]
+                    type_task = cerebro.core.task(type_task_id)
+                    break
+            
+            shot_tasks = cerebro.core.task_children(self.current_cerebro_task.id())
+            task_type_create = True
+            for shot_task in shot_tasks: # search thru sub tasks to find the task_type
+                name = shot_task.name()
+                if name==task_type: 
+                    task_type_create=False
+                    task_copy_to_id = shot_task.id()
+                if name in connection_to: conn_to.append(shot_task)
+                if name in connection_from: conn_from.append(shot_task)
+            
+            if task_type_create==True: # if task is not created - create it 
+                try: activity = type_task.activity()[0]
+                except: activity=0                
+                task_copy_to_id = db.add_task(self.current_cerebro_task.id(), task_type, activity)
+            
+            task_copy_to =  cerebro.core.task(task_copy_to_id)
+            
+            #get chars` names from listWidget and copy into new tasks
+            items = self.get_chars_from_listWidget()
+            for item in items:
+                
+                # find if the char has attribute for current type
+                attr_data = self.read_attr_data_from_task('asset_attr', item.cerebro_item.id)
+                if not task_type in attr_data: continue
+                
+                suffix = '_' + item. text()
+                new_id = twin_plugin.examples.action.paste_task_custom([task_copy_to], [type_task_id], suffix, db)
+                cerebro.core.print_error('new id'  + str(new_id))
+                cerebro.core.print_error('conn_to'  + str(conn_to))
+                cerebro.core.print_error('conn_from'  + str(conn_from))
+                if new_id:
+#                     connections = db.task_links(type_task_id) 
+                    for t in conn_to:
+                        first_task_id = new_id[0]
+                        second_task_id = t.id()
+                        db.set_link_tasks (first_task_id, second_task_id)
+                    
+                    for t in conn_from:
+                        first_task_id = t.id()
+                        second_task_id = new_id[0]
+                        db.set_link_tasks (first_task_id, second_task_id)
+                    
+#                     twin_plugin.examples.action.set_task_to_status(new_id[0], 'ready to start')
+                    
+            if items: #if sub tasks created - drop connections of the main task (dyn, etc)
+                connections = db.task_links(task_copy_to_id)
+                for conn in connections:
+                    conn_id = conn[pycerebro.dbtypes.TASK_LINK_ID] 
+                    db.drop_link_tasks(conn_id)     
+                    cerebro.core.print_error('Connection removed'  + str(conn_id))   
+            
+            self.hide()
+            cerebro.gui.information_box('Success', 'OK')
+            self.show()       
+        
+        def read_attr_data_from_task(self, tag_name, task_id):
+            cerebro_task = cerebro.aclasses.Task(task_id)
+            tags = cerebro_task.tags()
+            for tag in tags: 
+#                 tag.type() == tag.TYPE_MULTI_ENUM
+                if tag.name()==tag_name: 
+                    tag_value = tag.value() 
+                    try:return  [attr[1] for attr in tag_value]
+                    except:return []
+        
+        def chars_showhide(self):
+            if self.button_char_showhide.text()=='Show >>':
+                self.button_char_showhide.setText('Hide >>')
+                self.listWidget_chars_list.setVisible(True)
+                self.refresh_char_data()
+            else:
+                self.listWidget_chars_list.setVisible(False)
+                self.button_char_showhide.setText('Show >>')
+                
+        
+        def remove_char(self):
+            selection = self.listWidget_chars.selectedItems()
+            for item in selection:
+                cerebro_item = copy.copy (item.cerebro_item)
+                name = item.text()
+                #removing from listwidget
+                index = self.listWidget_chars.indexFromItem(item).row()
+                cerebro.core.print_error(name + ' removed  from index'  + str(index))
+                self.listWidget_chars.takeItem(index)
+                #adding to main char list
+                item = QListWidgetItem(name) 
+                item.cerebro_item = cerebro_item
+                self.listWidget_chars_list.addItem(item)
+            
+            self.update_shot_data()                   
+        
+        def add_char(self):
+            selection = self.listWidget_chars_list.selectedItems()
+            cerebro.core.print_error(' Selected '  + str(len(selection)))
+            for item in selection:
+                cerebro_item = copy.copy (item.cerebro_item)
+                name = item.text()
+                #removing from listwidget
+                index = self.listWidget_chars_list.indexFromItem(item).row()
+                cerebro.core.print_error(name + ' removed  from index'  + str(index))
+                self.listWidget_chars_list.takeItem(index)
+                #adding to main char list
+                item = QListWidgetItem(name) 
+                item.cerebro_item = cerebro_item
+                self.listWidget_chars.addItem(item)              
+
+                #
+                cerebro_task = cerebro.aclasses.Task(item.cerebro_item.id)
+                tags = cerebro_task.tags()
+                for tag in tags: 
+                    tag_name = tag.name()
+    #                 tag.type() == tag.TYPE_MULTI_ENUM
+                    if tag_name=='asset_attr': 
+                        tag_value = tag.value() 
+                        try:cerebro_item.attribs = [attr[1] for attr in tag_value]
+                        except:cerebro_item.attribs=[]
+                        cerebro.core.print_error('asset_attr  data: ' + repr(tag_value) + ' ' + str(tag.type()))
+            self.update_shot_data()
+        
+        def get_chars_from_listWidget(self):
+            char_shot_items = []
+            for index in range(self.listWidget_chars.count()): 
+                char_shot_items.append(self.listWidget_chars.item(index))
+            return char_shot_items            
+            
+        
+                            
+        def update_shot_data(self):
+            
+            char_shot_items = self.get_chars_from_listWidget()
+            
+            dict_export = {}
+            dict_export['chars']=[]
+            dict_export['env']=[]
+            dict_export['props']=[]
+            dict_export['elements']=[]
+            dict_export['description']=''
+            dict_export['misc']=[]
+            for i in range(len(char_shot_items)):
+                item = char_shot_items[i]
+                dict_val = {}
+                
+                for attr_k, attr_v in item.cerebro_item.__dict__.items():
+                    dict_val[attr_k]=attr_v
+                dict_export['chars'].append(dict_val)
+            
+            tags = self.current_cerebro_task.tags()
+            for tag in tags:  
+                cerebro.core.print_error('Tag name: ' + repr(tag.name()))      
+                if tag.name()=='passport':
+                    export_line = json.dumps(dict_export, indent=4, sort_keys=True)
+                    cerebro.core.print_error('EXPORT LINE: ' + export_line )
+                    tag.set_value(export_line)
+
+            
+#         def sync_charsLib_with_shot(self):
+#             self.listWidget_chars_list.clear()
+#             
+#             
+#             
+#             for k,v in self.charsLib.iteritems():
+#                 
+#                 
+#                 
+#                 item = QListWidgetItem(task.name()) 
+#                 item.cerebro_item = cerebro_item
+#                 self.listWidget_chars_list.addItem(item)
+            
+                        
+        def refresh_char_data(self):
+            if self.refresh_chars_Flag==True:return
+            
+            db=twin_plugin.examples.action.db_init()
+            
+            root_tasks = cerebro.core.root_tasks()
+            
+            proj_id = root_tasks[0].project_id()
+            tags = db.project_tags(proj_id)
+            tag_id = -1
+            enum_name_id = -1
+            for tag in tags:
+                tag_name = tag[pycerebro.dbtypes.TAG_DATA_NAME] #TASK_DATA_NAME 
+                if tag_name=='type': tag_id = tag[pycerebro.dbtypes.TAG_DATA_ID] 
+            
+            enums = db.tag_enums(tag_id)
+            for enum in enums:
+                enum_name = enum [pycerebro.dbtypes.TAG_ENUM_DATA_NAME]
+                if enum_name=='char': enum_name_id = enum [pycerebro.dbtypes.TAG_ENUM_DATA_ID]
+        
+            cerebro.core.print_error('Project id ' + repr(proj_id))    
+            cerebro.core.print_error('Tag id ' + repr(tag_id))
+            cerebro.core.print_error('Tag value id ' + repr(enum_name_id))
+            
+            sql_cmd = 'select null, * from "search_Tasks"(\r\n\'{%d}\'::bigint[]\r\n, \'\r\njoin tag_val_enum as tag_e on t.uid = tag_e.taskid\'::text\r\n, \'t.flags & 0000001 = 0\r\nand \r\n(\r\n(tag_e.tagid = %d and tag_e.del = 0 and (tag_e.enumid = %d))\r\n)\'::text\r\n, 5000\r\n);'
+            sql_cmd = sql_cmd%(proj_id, tag_id, enum_name_id)
+            result = db.execute(sql_cmd)
+#             cerebro.core.print_error(repr(result))
+            
+            shot_chars = [  item.cerebro_item.cerebro_path  for item in self.get_chars_from_listWidget()]
+            
+            for tup in result:
+                task_id = tup[1]
+                task = cerebro.core.task(task_id)
+                parent_url = task.parent_url()
+                cerebro_item = task_obj()
+                cerebro_item.name =  task.name()
+                cerebro_item.id =  task_id
+                url = parent_url + task.name()
+                cerebro_item.cerebro_path =  url
+                
+                self.charsLib[url] = cerebro_item
+
+                if url in shot_chars: continue
+                
+                item = QListWidgetItem(task.name()) 
+                item.cerebro_item = cerebro_item
+                self.listWidget_chars_list.addItem(item)
+                
+                
+            self.refresh_chars_Flag=True            
+        
+        def test(self):
+            t=itemThread(self)
+            cerebro.core.print_error('Thread started' )
+
+        def customEvent(self, event):
+            cerebro.core.print_error('Hello from thread: ' +repr(event))
+            
+#         def get_library_data(self):
+#             self.db = twin_plugin.examples.action.db_init()
+#             
+#             root_tasks = cerebro.core.root_tasks()
+#             
+#             self.char_tasks = []
+#             char_subfolder = '/ASSETS/CHARACTERS/main'
+#             env = []
+#             props = []
+#             elements = []
+#             
+#             for root_task in root_tasks:
+#                 full_path = '/' + root_task.name()+char_subfolder
+#                 full_path_id = self.db.task_by_url(full_path)[0]
+# #                 full_path_task = cerebro.core.task(full_path_id)
+#                 
+# #                 all_char_tasks =  twin_plugin.examples.action.find_children_recursive(full_path_id, self.db, all_kids=[])
+#                 all_char_tasks =  self.db.task_children(full_path_id)
+#                 cerebro.core.print_error('tasks amount: '+repr(len(all_char_tasks)) + ' ' + repr(full_path) )
+# #                 continue
+#                 for task in all_char_tasks: 
+#                     
+#                     task_id = task[pycerebro.dbtypes.TASK_DATA_ID]
+#                     task_name = task[pycerebro.dbtypes.TASK_DATA_NAME]
+#                     tag =  self.check_current_shot(task_id)
+#                     cerebro.core.print_error('Current tag: '+repr(tag) )
+#                     if tag=='char': cerebro.core.print_error('full_path: '+repr(task_name) )
+        
+        def read_data_from_shot(self, task=None, tagName='passport'):
+            if not task: current_task = self.current_cerebro_task
+            else: current_task = task 
+            tags = current_task.tags()
+            tag_value=None
+            for tag in tags: 
+                tag_name = tag.name()
+                if tag_name==tagName: tag_value = tag.value()     
+            try: return  json.loads(tag_value)
+            except: return None
+        
+        def populate_shot_chars(self):
+            tags = self.current_cerebro_task.tags()
+            tag_value=None
+            for tag in tags: 
+                tag_name = tag.name()
+                if tag_name=='passport': tag_value = tag.value()     
+            try: data = json.loads(tag_value)
+            except: cerebro.gui.information_box('Error', 'Could not read from passport attribute'); return
+            
+            self.listWidget_chars.clear()
+            
+            for char in data['chars']:
+                cerebro_item = task_obj()
+                cerebro_item.name =  char['name']
+                cerebro_item.id =  char['id']
+                cerebro_item.cerebro_path =  char['cerebro_path']
+                
+#                 self.charsLib[url] = cerebro_item
+
+                item = QListWidgetItem(char['name']) 
+                item.cerebro_item = cerebro_item
+                self.listWidget_chars.addItem(item)                       
+        
+        def show(self):
+            cerebro.core.print_error('SHOWWWWWWW ')
+            # type = self.check_current_shot()
+            type = 'shot'
+            cerebro.core.print_error(' "type" :  ' + repr(type))
+            if type==None:
+                cerebro.gui.information_box('Error', 'No "type" tag or empty. Exiting...')
+                cerebro.core.print_error('Error: No "type" tag or empty. Exiting...')
+                self.close()
+            # if not type[1]=='shot':
+            #     cerebro.gui.information_box('Error', 'Wrong type. This is not a shot. This is a ' +type[1] + '. Exiting...')
+            #     cerebro.core.print_error('Error: Wrong  "type" . Exiting...')
+            #     self.close()
+            tasks = cerebro.core.selected_tasks()
+            task = tasks[0]
+            self.setWindowTitle('Passport for shot '+str(task.name()))
+            
+            self.current_cerebro_task = task
+            
+            # self.populate_shot_chars()
+            
+            super(MyDialog, self).show()
+        
+        def check_current_shot(self, task_id=None):
+#             self.db = twin_plugin.examples.action.db_init()
+            
+            if task_id==None:
+                tasks = cerebro.core.selected_tasks()
+                if not tasks: return None
+                task_id=tasks[0].id()
+                
+#             tags = self.db.task_tags(task_id)
+            tags = tasks[0].tags()
+            
+            for tag in tags: 
+#                 tag_name = tag[pycerebro.dbtypes.TASK_TAG_DATA_NAME]
+#                 tag_value = tag[pycerebro.dbtypes.TASK_TAG_DATA_VALUE]
+                tag_name = tag.name()
+                tag_value = tag.value()
+                
+                if tag_name=='type': return tag_value
+            return None
+                                
+        
+        def button_click(self):
+            tasks = cerebro.core.selected_tasks()
+            cerebro.core.print_error('BUTTON PRESSED for task: ' + repr(tasks[0].name()))
+                        
+#     if not dialog:
+    dialog = MyDialog()
+#     dialog.setFixedSize(300,  200)
+    dialog.show() # main application interface remains blocked until the dialog window is closed
+#     dialog.exec_() # main application interface remains blocked until the dialog window is closed
+
+class customLineEdit(QLineEdit):
+    
+    def __init__(self, parent = None, text='test'):
+        super(customLineEdit,self).__init__(parent)
+        self.textValue = text
+        
+    def paintEvent(self, event):
+        QLineEdit.paintEvent(self, event)
+        if self.text().isEmpty() and not self.hasFocus():
+            panel = QStyleOptionFrameV2()
+            self.initStyleOption(panel)
+            textRect = self.style().subElementRect(
+                QStyle.SE_LineEditContents, panel, self)
+            horizontalMargin = 2;
+            textRect.adjust(horizontalMargin, 0, 0, 0)
+            
+            painter = QPainter(self)
+            painter.setPen(
+                self.palette().brush(
+                    QPalette.Disabled, QPalette.Text).color())
+            painter.drawText(
+                textRect, Qt.AlignLeft | Qt.AlignVCenter , self.textValue)
+
+
+
+
