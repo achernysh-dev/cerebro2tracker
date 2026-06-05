@@ -1,1 +1,1 @@
-git clone https://github.com/achernysh-dev/cerebro2tracker.git 
+git clone https://github.com/achernysh-dev/cerebro2tracker.git
