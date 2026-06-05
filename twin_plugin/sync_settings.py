@@ -32,19 +32,20 @@ def get_legacy_settings_dir():
 
 
 def get_settings_dir():
-    return get_package_dir()
+    """User-specific config outside the repo (safe for clone/pull)."""
+    return get_legacy_settings_dir()
 
 
 def get_settings_path():
+    return os.path.join(get_settings_dir(), "sync_settings.json")
+
+
+def _package_settings_path():
     return os.path.join(get_package_dir(), "sync_settings.json")
 
 
 def get_status_map_path():
     return os.path.join(get_package_dir(), "status_map.json")
-
-
-def _legacy_settings_path():
-    return os.path.join(get_legacy_settings_dir(), "sync_settings.json")
 
 
 def _legacy_status_map_path():
@@ -82,14 +83,18 @@ def _copy_file(src, dest):
         return False
 
 
-def _migrate_legacy_settings():
-    legacy = _legacy_settings_path()
-    package = get_settings_path()
-    if not os.path.isfile(legacy):
+def _migrate_package_settings():
+    """One-time: copy twin_plugin/sync_settings.json into AppData if it has user data."""
+    package = _package_settings_path()
+    dest = get_settings_path()
+    if not os.path.isfile(package):
         return False
-    if _settings_has_user_data(package):
+    if _settings_has_user_data(dest):
         return False
-    return _copy_file(legacy, package)
+    if not _settings_has_user_data(package):
+        return False
+    os.makedirs(get_settings_dir(), exist_ok=True)
+    return _copy_file(package, dest)
 
 
 def _migrate_legacy_status_map():
@@ -130,6 +135,7 @@ def ensure_sync_settings_file():
     path = get_settings_path()
     if os.path.isfile(path):
         return path
+    os.makedirs(get_settings_dir(), exist_ok=True)
     example = os.path.join(get_package_dir(), "sync_settings.json.example")
     if os.path.isfile(example):
         _copy_file(example, path)
@@ -142,10 +148,10 @@ def ensure_sync_settings_file():
 def ensure_config_files():
     """
     Ensure package JSON config files exist.
-    One-time migration: copy legacy AppData files when package files are still empty.
+    One-time migration: copy repo-local settings into AppData when needed.
     """
     ensure_sync_settings_file()
-    _migrate_legacy_settings()
+    _migrate_package_settings()
     _migrate_legacy_status_map()
     ensure_status_map_file()
     return get_settings_path()

@@ -60,35 +60,36 @@ class StatusMapSettingsTests(unittest.TestCase):
             self.assertEqual(merged["custom status"], "testing")
             self.assertEqual(merged["open"], "open")
 
-    def test_package_config_paths(self):
+    def test_config_paths(self):
         package_dir = sync_settings.get_package_dir()
+        settings_dir = sync_settings.get_legacy_settings_dir()
         self.assertTrue(
+            sync_settings.get_settings_path().startswith(settings_dir)
+        )
+        self.assertFalse(
             sync_settings.get_settings_path().startswith(package_dir)
         )
         self.assertTrue(
             sync_settings.get_status_map_path().startswith(package_dir)
         )
 
-    def test_migrate_legacy_settings_when_package_is_empty(self):
+    def test_migrate_package_settings_into_appdata(self):
         with tempfile.TemporaryDirectory() as tmp:
-            legacy_dir = os.path.join(tmp, "legacy")
+            settings_dir = os.path.join(tmp, "appdata")
             package_dir = os.path.join(tmp, "package")
-            os.makedirs(legacy_dir)
+            os.makedirs(settings_dir)
             os.makedirs(package_dir)
-            legacy_settings = os.path.join(legacy_dir, "sync_settings.json")
+            appdata_settings = os.path.join(settings_dir, "sync_settings.json")
             package_settings = os.path.join(package_dir, "sync_settings.json")
-            with open(legacy_settings, "w", encoding="utf-8") as fh:
-                json.dump({"tracker_token": "secret", "task_map": {}}, fh)
             with open(package_settings, "w", encoding="utf-8") as fh:
-                json.dump(sync_settings.DEFAULT_SETTINGS, fh)
+                json.dump({"tracker_token": "secret", "task_map": {}}, fh)
 
-            with patch.object(sync_settings, "get_legacy_settings_dir", return_value=legacy_dir):
+            with patch.object(sync_settings, "get_legacy_settings_dir", return_value=settings_dir):
                 with patch.object(sync_settings, "get_package_dir", return_value=package_dir):
-                    with patch.object(sync_settings, "get_settings_path", return_value=package_settings):
-                        migrated = sync_settings._migrate_legacy_settings()
+                    migrated = sync_settings._migrate_package_settings()
 
             self.assertTrue(migrated)
-            with open(package_settings, encoding="utf-8") as fh:
+            with open(appdata_settings, encoding="utf-8") as fh:
                 data = json.load(fh)
             self.assertEqual(data["tracker_token"], "secret")
 

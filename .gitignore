@@ -4,5 +4,6 @@ __pycache__/
 *.pyc
 tracker_structure.json
 
-# Filled sync settings may contain Tracker tokens (template ships empty).
-twin_plugin/sync_settings.json
+# User sync config (tokens, task map). Stored in AppData; ignore any copy in the repo.
+**/sync_settings.json
+!**/sync_settings.json.example
