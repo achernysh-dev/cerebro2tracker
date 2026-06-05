@@ -12,6 +12,7 @@ def _ensure_tracker_importable():
         pass
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     candidates = [
+        os.path.join(repo_root, "vendor", "site-packages"),
         os.path.join(repo_root, ".venv", "Lib", "site-packages"),
         os.path.join(repo_root, ".venv", "lib", "site-packages"),
     ]
@@ -35,7 +36,7 @@ def make_client(token=None, cloud_org_id=None, org_id=None):
     except ImportError:
         return None, (
             "yandex_tracker_client is not installed. "
-            "Install it in Cerebro Python or add the project .venv to PYTHONPATH."
+            "Run scripts\\vendor_deps.bat or install yandex-tracker-client into the project vendor folder."
         )
 
     token = (token or "").strip() or None
