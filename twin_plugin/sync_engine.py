@@ -310,6 +310,31 @@ def _issue_accessible(client, issue_key):
     return "_error" not in snap and not err.startswith("403") and not err.startswith("404")
 
 
+def _snapshot_queue_key(snap):
+    q = snap.get("queue")
+    if isinstance(q, dict):
+        return q.get("key")
+    return q
+
+
+def _issue_in_queue(client, issue_key, queue_key):
+    if not queue_key:
+        return True
+    snap = _get_issue_snapshot(client, issue_key)
+    if snap.get("_error"):
+        return False
+    actual = _snapshot_queue_key(snap)
+    return not actual or actual == queue_key
+
+
+def _invalidate_stale_issue_mapping(task_map, cerebro_id, issue_key, reason):
+    _sync_log(
+        "%s: stale mapping for Cerebro %s (%s) — will sync in current project queue"
+        % (issue_key, cerebro_id, reason)
+    )
+    task_map.pop(cerebro_id, None)
+
+
 def _transition_to_key(transition):
     to_ref = getattr(transition, "to", None)
     if to_ref is None:
@@ -689,11 +714,18 @@ def create_or_update_issue(
     issue = None
     if existing_key:
         if not _issue_accessible(client, existing_key):
-            _sync_log(
-                "%s: no access to mapped issue for Cerebro %s — remapping"
-                % (existing_key, cerebro_id)
+            _invalidate_stale_issue_mapping(
+                task_map, cerebro_id, existing_key, "no access"
             )
-            task_map.pop(cerebro_id, None)
+            existing_key = None
+        elif not _issue_in_queue(client, existing_key, queue_key):
+            _invalidate_stale_issue_mapping(
+                task_map,
+                cerebro_id,
+                existing_key,
+                "queue was %s, need %s"
+                % (_snapshot_queue_key(_get_issue_snapshot(client, existing_key)), queue_key),
+            )
             existing_key = None
         else:
             try:
@@ -715,6 +747,8 @@ def create_or_update_issue(
             "deadline": finish_s,
             "end": finish_s,
         }
+        if project_spec:
+            updates["project"] = project_spec
         if parent_key:
             updates["parent"] = parent_key
         try:
@@ -783,31 +817,33 @@ def create_or_update_issue(
     return issue_key, True, tracker_url
 
 
-def collect_sync_jobs(checked_nodes, nodes_by_id, root_ids):
+def collect_sync_jobs(checked_nodes, nodes_by_id, root_ids=None):
     """
     checked_nodes: explicitly checked branch nodes visible in the Cerebro tree only.
     Hidden leaf tasks (cut from UI) are NOT synced.
+
+    Each topmost checked node (no checked parent) becomes a Tracker *project*.
+    Other checked nodes under it become issues in that project's queue.
     """
-    root_ids = set(root_ids)
+    checked_ids = {n["id"] for n in checked_nodes}
+    project_root_ids = _project_roots(checked_nodes, nodes_by_id)
     jobs = []
     seen_issue_ids = set()
-    project_roots = set()
     siblings_under_parent = {}
 
-    def add_issue(node, root_id, cerebro_parent_id):
+    def add_issue(node, project_id, cerebro_parent_id):
         nid = node["id"]
         if nid in seen_issue_ids:
             return
         seen_issue_ids.add(nid)
-        project_roots.add(root_id)
-        sib_key = (root_id, cerebro_parent_id)
+        sib_key = (project_id, cerebro_parent_id)
         sibling_index = siblings_under_parent.get(sib_key, 0)
         siblings_under_parent[sib_key] = sibling_index + 1
         jobs.append(
             {
                 "kind": "issue",
                 "node": node,
-                "root_id": root_id,
+                "root_id": project_id,
                 "cerebro_parent_id": cerebro_parent_id,
                 "sibling_index": sibling_index,
             }
@@ -815,14 +851,17 @@ def collect_sync_jobs(checked_nodes, nodes_by_id, root_ids):
 
     for node in checked_nodes:
         nid = node["id"]
-        if nid in root_ids:
-            project_roots.add(nid)
+        if nid in project_root_ids:
             continue
-        root_id = _find_root_id(nid, nodes_by_id, root_ids)
-        add_issue(node, root_id, _cerebro_parent_id(nid, nodes_by_id, root_ids))
+        project_id = _find_project_root(nid, nodes_by_id, project_root_ids)
+        add_issue(
+            node,
+            project_id,
+            _cerebro_parent_id(nid, nodes_by_id, project_root_ids, checked_ids),
+        )
 
     project_jobs = []
-    for rid in project_roots:
+    for rid in sorted(project_root_ids):
         root_node = nodes_by_id.get(rid)
         if root_node:
             project_jobs.append({"kind": "project", "node": root_node, "root_id": rid})
@@ -830,7 +869,7 @@ def collect_sync_jobs(checked_nodes, nodes_by_id, root_ids):
     issue_jobs = [j for j in jobs if j["kind"] == "issue"]
     issue_jobs.sort(
         key=lambda j: (
-            _tree_depth(j["node"]["id"], nodes_by_id, root_ids),
+            _tree_depth(j["node"]["id"], nodes_by_id, project_root_ids),
             j.get("cerebro_parent_id") or 0,
             j.get("sibling_index", 0),
             j["node"]["id"],
@@ -839,7 +878,32 @@ def collect_sync_jobs(checked_nodes, nodes_by_id, root_ids):
     return project_jobs + issue_jobs
 
 
+def _project_roots(checked_nodes, nodes_by_id):
+    """Topmost checked nodes — each maps to one Tracker project."""
+    checked_ids = {n["id"] for n in checked_nodes}
+    roots = set()
+    for node in checked_nodes:
+        nid = node["id"]
+        pid = node.get("cerebro_parent_id")
+        if pid is None or pid not in checked_ids:
+            roots.add(nid)
+    return roots
+
+
+def _find_project_root(task_id, nodes_by_id, project_root_ids):
+    if task_id in project_root_ids:
+        return task_id
+    node = nodes_by_id.get(task_id)
+    while node and node.get("cerebro_parent_id") is not None:
+        pid = node["cerebro_parent_id"]
+        if pid in project_root_ids:
+            return pid
+        node = nodes_by_id.get(pid)
+    return task_id
+
+
 def _find_root_id(task_id, nodes_by_id, root_ids):
+    """Legacy: Cerebro tree root (top-level project). Prefer _find_project_root for sync."""
     if task_id in root_ids:
         return task_id
     node = nodes_by_id.get(task_id)
@@ -851,23 +915,32 @@ def _find_root_id(task_id, nodes_by_id, root_ids):
     return task_id
 
 
-def _cerebro_parent_id(task_id, nodes_by_id, root_ids):
+def _cerebro_parent_id(task_id, nodes_by_id, project_root_ids, checked_ids=None):
+    """Nearest checked ancestor for Tracker parent link (not the project root)."""
     node = nodes_by_id.get(task_id)
     if not node:
         return None
     pid = node.get("cerebro_parent_id")
-    if pid is None or pid in root_ids:
-        return None
-    return pid
+    while pid is not None:
+        if pid in project_root_ids:
+            return None
+        if checked_ids is None or pid in checked_ids:
+            return pid
+        node = nodes_by_id.get(pid)
+        if not node:
+            break
+        pid = node.get("cerebro_parent_id")
+    return None
 
 
-def _tree_depth(task_id, nodes_by_id, root_ids):
+def _tree_depth(task_id, nodes_by_id, project_root_ids):
     depth = 0
     node = nodes_by_id.get(task_id)
-    while node and node.get("cerebro_parent_id") is not None:
+    project_root = _find_project_root(task_id, nodes_by_id, project_root_ids)
+    while node and node.get("id") != project_root:
         depth += 1
-        pid = node["cerebro_parent_id"]
-        if pid in root_ids:
+        pid = node.get("cerebro_parent_id")
+        if pid is None:
             break
         node = nodes_by_id.get(pid)
     return depth

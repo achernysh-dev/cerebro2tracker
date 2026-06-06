@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QLabel,
     QMessageBox,
+    QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
 
@@ -478,7 +479,7 @@ def sync_ui():
         def _on_cerebro_finished(self):
             self._remove_loading_placeholder(self.left_tree)
             self._cerebro_load_done = True
-            self._restore_checked_items()
+            self._restore_checked_items(reveal_after=True)
             self._update_title_idle()
 
         def _on_cerebro_error(self, message):
@@ -569,25 +570,76 @@ def sync_ui():
             sync_log.log("Tracker structure load error: %s" % message)
             self._update_title_idle()
 
-        def _restore_checked_items(self):
-            saved = set(self._settings.get("checked_cerebro_task_ids") or [])
+        def _normalize_task_id(self, task_id):
+            if task_id is None:
+                return None
+            try:
+                return int(task_id)
+            except (TypeError, ValueError):
+                return task_id
+
+        def _expand_tree_ancestors(self, item):
+            parent = item.parent()
+            while parent is not None:
+                parent.setExpanded(True)
+                parent = parent.parent()
+
+        def _left_tree_item_for_id(self, task_id):
+            tid = self._normalize_task_id(task_id)
+            if tid is None:
+                return None
+            item = self._items_by_id.get(tid)
+            if item is not None:
+                return item
+            for key, candidate in self._items_by_id.items():
+                if self._normalize_task_id(key) == tid:
+                    return candidate
+            return None
+
+        def _reveal_checked_left_items(self, task_ids):
+            """Expand ancestors and scroll to first checked item (deferred)."""
+            items = []
+            for tid in task_ids:
+                item = self._left_tree_item_for_id(tid)
+                if item is not None:
+                    items.append(item)
+            if not items:
+                return
+            self.left_tree.setUpdatesEnabled(False)
+            try:
+                for item in items:
+                    self._expand_tree_ancestors(item)
+            finally:
+                self.left_tree.setUpdatesEnabled(True)
+            focus_item = items[0]
+            self.left_tree.setCurrentItem(focus_item)
+            self.left_tree.scrollToItem(
+                focus_item,
+                QAbstractItemView.ScrollHint.PositionAtCenter,
+            )
+
+        def _restore_checked_items(self, reveal_after=False):
+            raw = self._settings.get("checked_cerebro_task_ids") or []
+            saved = [
+                tid
+                for tid in (self._normalize_task_id(x) for x in raw)
+                if tid is not None
+            ]
             if not saved:
                 return
             self._restoring_checks = True
             self.left_tree.blockSignals(True)
+            try:
+                for tid in saved:
+                    item = self._left_tree_item_for_id(tid)
+                    if item is not None:
+                        item.setCheckState(0, Qt.CheckState.Checked)
+            finally:
+                self.left_tree.blockSignals(False)
+                self._restoring_checks = False
 
-            def walk(item):
-                tid = item.data(0, _ITEM_DATA_USER_ROLE)
-                if tid in saved:
-                    item.setCheckState(0, Qt.CheckState.Checked)
-                for i in range(item.childCount()):
-                    walk(item.child(i))
-
-            for i in range(self.left_tree.topLevelItemCount()):
-                walk(self.left_tree.topLevelItem(i))
-
-            self.left_tree.blockSignals(False)
-            self._restoring_checks = False
+            if reveal_after:
+                QTimer.singleShot(0, lambda ids=list(saved): self._reveal_checked_left_items(ids))
 
         def _on_left_item_changed(self, item, column):
             if self._restoring_checks or column != 0:
