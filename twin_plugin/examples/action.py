@@ -61,9 +61,9 @@ def add_menu():
 	icon = cerebro.core.python_api_dir() + '/examples/icon.png'
 # 	cerebro.core.print_error("Cerebro ROOT = "+repr(cerebro.core.python_api_dir()))
 	# Добавим в главное меню пользовательское меню
-	mainMenu = cerebro.actions.MainMenu() # Получили главное меню
-	userMenu = mainMenu.add_menu('Glukoza') # добавили пользовательское меню
-	userSubmenu = userMenu.add_menu('Technical') # добавили в пользовательское меню подменю
+	# mainMenu = cerebro.actions.MainMenu() # Получили главное меню
+	# userMenu = mainMenu.add_menu('Glukoza') # добавили пользовательское меню
+	# userSubmenu = userMenu.add_menu('Technical') # добавили в пользовательское меню подменю
 
 	current_user = cerebro.core.user_profile() # получили профиль пользователя
 
@@ -81,39 +81,39 @@ def add_menu():
 # 	act = cerebro.actions.Action('twin_plugin.examples.action.task_info_show', 'Информация о задаче', icon)
 # 	taskMenu.add_action(act) # добавили действие
 	
-	actCopy = cerebro.actions.Action('twin_plugin.examples.action.copy_task', 'Копирование задачи', icon)
-	taskMenu.add_action(actCopy) # добавили действие
+	# actCopy = cerebro.actions.Action('twin_plugin.examples.action.copy_task', 'Копирование задачи', icon)
+	# taskMenu.add_action(actCopy) # добавили действие
 	
-	actPaste = cerebro.actions.Action('twin_plugin.examples.action.paste_task', 'Вставка_задачи', icon)
-	taskMenu.add_action(actPaste) # добавили действие
+	# actPaste = cerebro.actions.Action('twin_plugin.examples.action.paste_task', 'Вставка_задачи', icon)
+	# taskMenu.add_action(actPaste) # добавили действие
 	
-	actRemoveAssigned = cerebro.actions.Action('twin_plugin.examples.action.remove_all_assigned', 'Удалить ВСЕХ назначенных', icon)
-	userMenu.add_action(actRemoveAssigned) # добавили действие
+	# actRemoveAssigned = cerebro.actions.Action('twin_plugin.examples.action.remove_all_assigned', 'Удалить ВСЕХ назначенных', icon)
+	# userMenu.add_action(actRemoveAssigned) # добавили действие
 	
-	tmpButton = cerebro.actions.Action('twin_plugin.examples.action.change_link_for_cam', 'Временная кнопка', icon)
-	userSubmenu.add_action(tmpButton) # добавили действие
+	# tmpButton = cerebro.actions.Action('twin_plugin.examples.action.change_link_for_cam', 'Временная кнопка', icon)
+	# userSubmenu.add_action(tmpButton) # добавили действие
 	
-	tmpButton = cerebro.actions.Action('twin_plugin.examples.action.export_sel_to_file', 'Временная кнопка (кспорт в файл)', icon)
-	userSubmenu.add_action(tmpButton) # добавили действие
+	# tmpButton = cerebro.actions.Action('twin_plugin.examples.action.export_sel_to_file', 'Временная кнопка (кспорт в файл)', icon)
+	# userSubmenu.add_action(tmpButton) # добавили действие
 	
-	tmpButton2 = cerebro.actions.Action('twin_plugin.examples.action.sync_asset_path', 'Переброс ассетов по путям', icon)
-	userSubmenu.add_action(tmpButton2) # добавили действие
+	# tmpButton2 = cerebro.actions.Action('twin_plugin.examples.action.sync_asset_path', 'Переброс ассетов по путям', icon)
+	# userSubmenu.add_action(tmpButton2) # добавили действие
 	
-	preProdLinks = cerebro.actions.Action('twin_plugin.examples.action.make_preprod_links', 'Установить связи препродакшена ', icon)
-	userMenu.add_action(preProdLinks) # добавили действие
+	# preProdLinks = cerebro.actions.Action('twin_plugin.examples.action.make_preprod_links', 'Установить связи препродакшена ', icon)
+	# userMenu.add_action(preProdLinks) # добавили действие
 	
 	
-	refreshSeqLen = cerebro.actions.Action('twin_plugin.custom.refresh_seq_length', 'Refresh sequence length ', icon)
-	userMenu.add_action(refreshSeqLen) # добавили действие
+	# refreshSeqLen = cerebro.actions.Action('twin_plugin.custom.refresh_seq_length', 'Refresh sequence length ', icon)
+	# userMenu.add_action(refreshSeqLen) # добавили действие
 	
-	preProdLinks = cerebro.actions.Action('twin_plugin.custom.update_frames', 'Обновить поле FRAMES', icon)
-	userMenu.add_action(preProdLinks) # добавили действие
+	# preProdLinks = cerebro.actions.Action('twin_plugin.custom.update_frames', 'Обновить поле FRAMES', icon)
+	# userMenu.add_action(preProdLinks) # добавили действие
 	
-	disconnectCam = cerebro.actions.Action('twin_plugin.examples.action.disconnect_cam', 'Разорвать связи задач', icon)
-	userMenu.add_action(disconnectCam) # добавили действие
+	# disconnectCam = cerebro.actions.Action('twin_plugin.examples.action.disconnect_cam', 'Разорвать связи задач', icon)
+	# userMenu.add_action(disconnectCam) # добавили действие
 	
-	testAction = cerebro.actions.Action('twin_plugin.examples.action.test_2', 'Обнулить время задачи', icon)
-	userSubmenu.add_action(testAction) # добавили действие
+	# testAction = cerebro.actions.Action('twin_plugin.examples.action.test_2', 'Обнулить время задачи', icon)
+	# userSubmenu.add_action(testAction) # добавили действие
 	
 # 	testui = cerebro.actions.Action('twin_plugin.examples.action.testui', 'Test UI', icon)
 # 	userMenu.add_action(testui) # добавили действие
