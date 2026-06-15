@@ -233,12 +233,9 @@ class SettingsDialog(QDialog):
         self.token_input.setText(settings.get("tracker_token", ""))
         self.cloud_org_input = QLineEdit()
         self.cloud_org_input.setText(settings.get("tracker_cloud_org_id", ""))
-        self.portfolio_id_input = QLineEdit()
-        self.portfolio_id_input.setText(settings.get("parent_portfolio_id", ""))
 
         layout.addRow("TRACKER_TOKEN:", self.token_input)
         layout.addRow("TRACKER_CLOUD_ORG_ID:", self.cloud_org_input)
-        layout.addRow("PARENT_PORTFOLIO_ID:", self.portfolio_id_input)
 
         self.save_button = QPushButton("Save")
         self.save_button.clicked.connect(self.accept)
@@ -249,7 +246,6 @@ class SettingsDialog(QDialog):
         return {
             "tracker_token": self.token_input.text().strip(),
             "tracker_cloud_org_id": self.cloud_org_input.text().strip(),
-            "parent_portfolio_id": self.portfolio_id_input.text().strip(),
         }
 
 
@@ -512,15 +508,15 @@ def sync_ui():
                 self._tracker_items_by_id[sid] = item
                 self._tracker_nodes_by_id[sid] = node
 
-        def _on_tracker_current_changed(self, current, _previous):
-            if self._restoring_tracker_selection or current is None:
-                return
+        def _apply_portfolio_selection(self, current):
+            if current is None:
+                return False
             ntype = current.data(0, _ITEM_NODE_TYPE_ROLE)
             if ntype != "portfolio":
-                return
+                return False
             nid = current.data(0, _ITEM_DATA_USER_ROLE)
             if nid is None:
-                return
+                return False
             node = self._tracker_nodes_by_id.get(str(nid), {})
             short_id = node.get("shortId")
             portfolio_ref = (
@@ -529,6 +525,12 @@ def sync_ui():
             self._settings["selected_tracker_portfolio_id"] = str(nid)
             self._settings["parent_portfolio_id"] = portfolio_ref
             sync_settings.save(self._settings)
+            return True
+
+        def _on_tracker_current_changed(self, current, _previous):
+            if self._restoring_tracker_selection:
+                return
+            self._apply_portfolio_selection(current)
 
         def _restore_tracker_selection(self):
             saved_id = (
@@ -686,11 +688,26 @@ def sync_ui():
             dlg = SettingsDialog(self, self._settings)
             if dlg.exec():
                 values = dlg.get_values()
-                self._settings.update(values)
+                creds_changed = (
+                    values.get("tracker_token")
+                    != self._settings.get("tracker_token")
+                    or values.get("tracker_cloud_org_id")
+                    != self._settings.get("tracker_cloud_org_id")
+                )
+                self._settings["tracker_token"] = values["tracker_token"]
+                self._settings["tracker_cloud_org_id"] = values["tracker_cloud_org_id"]
+                if creds_changed:
+                    self._settings["parent_portfolio_id"] = ""
+                    self._settings["selected_tracker_portfolio_id"] = ""
                 sync_settings.save(self._settings)
                 if sync_settings.has_tracker_credentials(self._settings):
                     self._start_tracker_load()
                 self._update_sync_enabled()
+
+        def _has_target_portfolio(self):
+            if (self._settings.get("parent_portfolio_id") or "").strip():
+                return True
+            return self._apply_portfolio_selection(self.right_tree.currentItem())
 
         def do_sync(self):
             checked = self._collect_checked_nodes()
@@ -704,11 +721,12 @@ def sync_ui():
                     "Configure TRACKER_TOKEN and TRACKER_CLOUD_ORG_ID in Settings.",
                 )
                 return
-            if not (self._settings.get("parent_portfolio_id") or "").strip():
+            if not self._has_target_portfolio():
                 QMessageBox.warning(
                     self,
                     "Sync",
-                    "Set PARENT_PORTFOLIO_ID in Settings (target portfolio for new projects).",
+                    "Select a target portfolio in the Tracker structure tree "
+                    "(right panel). New projects will be created under it.",
                 )
                 return
 

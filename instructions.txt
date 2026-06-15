@@ -1,0 +1,9 @@
+Инструкция по установке плагина для Церебро:
+
+1) Скачайте и установите GIT для скачивания и обновления плагина из интернет. https://git-scm.com/install/windows
+2) создайте папку на диске, куда будет скачан плагин
+3) перейдите в эту папку из консоли CMD (Windows+R, cmd). Например, командой cd c:\cerebro_plugin
+4) находясь в этой папке выполните команду git clone https://github.com/achernysh-dev/cerebro2tracker.git
+   обновить плагин можно командой git pull, находясь в папке cerebro2tracker
+5) в церебро вызвать Tools->Developers plugins. Там с включенным режимом "Enable developer mode" добавить плагин из скачанной папки .../cerebro2tracker/twin_plugin
+Должна появится кнопка на панели инструментов "Sync to Tracker"
