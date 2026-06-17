@@ -1,0 +1,1 @@
+{"sessionId": "66fa68", "hypothesisId": "B", "location": "sync_ui.py:_on_tracker_current_changed", "message": "portfolio selected in tree", "data": {"selected_tracker_portfolio_id": "6a24113fd0c071491c77d390", "parent_portfolio_id": "33", "portfolio_name": "Анимационный портфель"}, "timestamp": 1781541041157}

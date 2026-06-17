@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QFormLayout,
     QLineEdit,
+    QComboBox,
     QTreeWidget,
     QTreeWidgetItem,
     QTextEdit,
@@ -192,7 +193,12 @@ class MainThreadTrackerLoader(QObject):
             return
         try:
             if not self._flat:
-                hierarchy = build_hierarchy(self._client)
+                hierarchy = build_hierarchy(
+                    self._client,
+                    include_queues=False,
+                    include_links=False,
+                    exclude_orphan_projects=True,
+                )
                 self._flat = self._flatten_hierarchy(hierarchy)
                 self._index = 0
             if self._index >= len(self._flat):
@@ -226,26 +232,65 @@ class SettingsDialog(QDialog):
         super(SettingsDialog, self).__init__(parent)
         self.setWindowTitle("Tracker Settings")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        settings = settings or sync_settings.load()
+        self._settings = dict(settings or sync_settings.load())
 
         layout = QFormLayout()
         self.token_input = QLineEdit()
-        self.token_input.setText(settings.get("tracker_token", ""))
-        self.cloud_org_input = QLineEdit()
-        self.cloud_org_input.setText(settings.get("tracker_cloud_org_id", ""))
+        self.token_input.setText(self._settings.get("tracker_token", ""))
+
+        self.org_id_type_combo = QComboBox()
+        self.org_id_type_combo.addItem(
+            "TRACKER_CLOUD_ORG_ID (X-Cloud-Org-Id)", sync_settings.ORG_ID_TYPE_CLOUD
+        )
+        self.org_id_type_combo.addItem(
+            "TRACKER_ORG_ID (X-Org-Id)", sync_settings.ORG_ID_TYPE_LEGACY
+        )
+        org_type = sync_settings.tracker_org_id_type(self._settings)
+        idx = self.org_id_type_combo.findData(org_type)
+        self.org_id_type_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._prev_org_id_type = self.org_id_type_combo.currentData()
+
+        self.org_id_input = QLineEdit()
+        self._refresh_org_id_input()
+        self.org_id_type_combo.currentIndexChanged.connect(
+            self._on_org_id_type_changed
+        )
 
         layout.addRow("TRACKER_TOKEN:", self.token_input)
-        layout.addRow("TRACKER_CLOUD_ORG_ID:", self.cloud_org_input)
+        layout.addRow("Org ID type:", self.org_id_type_combo)
+        layout.addRow("Org ID:", self.org_id_input)
 
         self.save_button = QPushButton("Save")
         self.save_button.clicked.connect(self.accept)
         layout.addRow(self.save_button)
         self.setLayout(layout)
 
+    def _org_key_for_type(self, org_type):
+        if org_type == sync_settings.ORG_ID_TYPE_LEGACY:
+            return "tracker_org_id"
+        return "tracker_cloud_org_id"
+
+    def _refresh_org_id_input(self):
+        org_type = self.org_id_type_combo.currentData()
+        key = self._org_key_for_type(org_type)
+        self.org_id_input.setText(self._settings.get(key, ""))
+
+    def _on_org_id_type_changed(self, _index):
+        old_key = self._org_key_for_type(self._prev_org_id_type)
+        self._settings[old_key] = self.org_id_input.text().strip()
+        self._prev_org_id_type = self.org_id_type_combo.currentData()
+        self._refresh_org_id_input()
+
     def get_values(self):
+        org_type = self.org_id_type_combo.currentData() or sync_settings.ORG_ID_TYPE_CLOUD
+        key = self._org_key_for_type(org_type)
+        self._settings[key] = self.org_id_input.text().strip()
+        self._settings["tracker_org_id_type"] = org_type
         return {
             "tracker_token": self.token_input.text().strip(),
-            "tracker_cloud_org_id": self.cloud_org_input.text().strip(),
+            "tracker_org_id_type": org_type,
+            "tracker_cloud_org_id": (self._settings.get("tracker_cloud_org_id") or "").strip(),
+            "tracker_org_id": (self._settings.get("tracker_org_id") or "").strip(),
         }
 
 
@@ -331,12 +376,13 @@ def sync_ui():
                 QMessageBox.warning(
                     self,
                     "Tracker credentials",
-                    "Configure TRACKER_TOKEN and TRACKER_CLOUD_ORG_ID in Settings "
+                    "Configure TRACKER_TOKEN and an org ID (Settings) "
                     "to load the Tracker structure.",
                 )
                 self._tracker_load_done = True
+                self._defer_tracker_load = False
             else:
-                self._start_tracker_load()
+                self._defer_tracker_load = True
 
             self._start_cerebro_load()
 
@@ -691,11 +737,17 @@ def sync_ui():
                 creds_changed = (
                     values.get("tracker_token")
                     != self._settings.get("tracker_token")
+                    or values.get("tracker_org_id_type")
+                    != self._settings.get("tracker_org_id_type")
                     or values.get("tracker_cloud_org_id")
                     != self._settings.get("tracker_cloud_org_id")
+                    or values.get("tracker_org_id")
+                    != self._settings.get("tracker_org_id")
                 )
                 self._settings["tracker_token"] = values["tracker_token"]
+                self._settings["tracker_org_id_type"] = values["tracker_org_id_type"]
                 self._settings["tracker_cloud_org_id"] = values["tracker_cloud_org_id"]
+                self._settings["tracker_org_id"] = values["tracker_org_id"]
                 if creds_changed:
                     self._settings["parent_portfolio_id"] = ""
                     self._settings["selected_tracker_portfolio_id"] = ""
@@ -718,7 +770,7 @@ def sync_ui():
                 QMessageBox.warning(
                     self,
                     "Sync",
-                    "Configure TRACKER_TOKEN and TRACKER_CLOUD_ORG_ID in Settings.",
+                    "Configure TRACKER_TOKEN and an org ID in Settings.",
                 )
                 return
             if not self._has_target_portfolio():
@@ -804,5 +856,7 @@ def sync_ui():
 
     dialog = SyncDialog()
     dialog.show()
+    if getattr(dialog, "_defer_tracker_load", False):
+        dialog._start_tracker_load()
     global _sync_dialog
     _sync_dialog = dialog

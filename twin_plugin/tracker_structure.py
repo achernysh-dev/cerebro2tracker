@@ -116,11 +116,12 @@ def _normalize_entity(raw, links):
     }
 
 
-def _collect_entities(client, limit):
+def _collect_entities(client, limit, include_links=True, include_queues=True):
     flat = []
+    project_fields = PROJECT_FIELDS if include_queues else PORTFOLIO_FIELDS
     for entity_type, fields in (
         ("portfolio", PORTFOLIO_FIELDS),
-        ("project", PROJECT_FIELDS),
+        ("project", project_fields),
     ):
         try:
             values = _v3_search_all(client, entity_type, fields, max_items=limit)
@@ -137,8 +138,11 @@ def _collect_entities(client, limit):
             continue
         for raw in values:
             eid = raw.get("id")
-            links = _v3_links(client, entity_type, eid) if eid else []
-            links = [_parse_link(x) for x in links if _parse_link(x)]
+            if include_links and eid:
+                links = _v3_links(client, entity_type, eid)
+                links = [_parse_link(x) for x in links if _parse_link(x)]
+            else:
+                links = []
             flat.append(_normalize_entity(raw, links))
     return flat
 
@@ -298,13 +302,25 @@ def _sort_roots(roots):
     return portfolios + projects
 
 
-def build_hierarchy(client, limit=None, per_page=None):
+def build_hierarchy(
+    client,
+    limit=None,
+    per_page=None,
+    include_queues=True,
+    include_links=True,
+    exclude_orphan_projects=False,
+):
     limit = limit or DEFAULT_ENTITY_LIMIT
     per_page = per_page or DEFAULT_ISSUES_PER_QUEUE
-    flat = _collect_entities(client, limit)
+    flat = _collect_entities(
+        client, limit, include_links=include_links, include_queues=include_queues
+    )
     roots = _build_tree(flat)
-    for root in roots:
-        _attach_tasks(client, root, per_page)
+    if exclude_orphan_projects:
+        roots = [r for r in roots if r.get("nodeType") != "project"]
+    if include_queues:
+        for root in roots:
+            _attach_tasks(client, root, per_page)
     return [_strip_internal(r) for r in _sort_roots(roots)]
 
 

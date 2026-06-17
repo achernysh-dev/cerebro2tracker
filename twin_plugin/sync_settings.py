@@ -8,9 +8,14 @@ from .status_map import DEFAULT_CEREBRO_STATUS_TO_TRACKER_KEY, normalize_cerebro
 
 _PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+ORG_ID_TYPE_CLOUD = "cloud"
+ORG_ID_TYPE_LEGACY = "org"
+
 DEFAULT_SETTINGS = {
     "tracker_token": "",
+    "tracker_org_id_type": ORG_ID_TYPE_CLOUD,
     "tracker_cloud_org_id": "",
+    "tracker_org_id": "",
     "parent_portfolio_id": "",
     "selected_tracker_portfolio_id": "",
     "checked_cerebro_task_ids": [],
@@ -63,6 +68,8 @@ def _settings_has_user_data(path):
         if (data.get("tracker_token") or "").strip():
             return True
         if (data.get("tracker_cloud_org_id") or "").strip():
+            return True
+        if (data.get("tracker_org_id") or "").strip():
             return True
         if data.get("task_map"):
             return True
@@ -201,6 +208,7 @@ def _load_dotenv_fallback():
             mapping = {
                 "TRACKER_TOKEN": "tracker_token",
                 "TRACKER_CLOUD_ORG_ID": "tracker_cloud_org_id",
+                "TRACKER_ORG_ID": "tracker_org_id",
                 "PARENT_PORTFOLIO_ID": "parent_portfolio_id",
             }
             if key in mapping:
@@ -274,8 +282,21 @@ def task_map_issue_key(entry):
     return entry
 
 
+def tracker_org_id_type(settings=None):
+    s = settings or load()
+    org_type = (s.get("tracker_org_id_type") or ORG_ID_TYPE_CLOUD).strip()
+    if org_type not in (ORG_ID_TYPE_CLOUD, ORG_ID_TYPE_LEGACY):
+        org_type = ORG_ID_TYPE_CLOUD
+    return org_type
+
+
+def active_tracker_org_id(settings=None):
+    s = settings or load()
+    if tracker_org_id_type(s) == ORG_ID_TYPE_LEGACY:
+        return (s.get("tracker_org_id") or "").strip()
+    return (s.get("tracker_cloud_org_id") or "").strip()
+
+
 def has_tracker_credentials(settings=None):
     s = settings or load()
-    return bool((s.get("tracker_token") or "").strip()) and bool(
-        (s.get("tracker_cloud_org_id") or "").strip()
-    )
+    return bool((s.get("tracker_token") or "").strip()) and bool(active_tracker_org_id(s))

@@ -55,6 +55,12 @@ def make_client(token=None, cloud_org_id=None, org_id=None):
 
 
 def make_client_from_settings(settings):
+    org_type = (settings.get("tracker_org_id_type") or "cloud").strip()
+    if org_type == "org":
+        return make_client(
+            token=settings.get("tracker_token"),
+            org_id=settings.get("tracker_org_id"),
+        )
     return make_client(
         token=settings.get("tracker_token"),
         cloud_org_id=settings.get("tracker_cloud_org_id"),
