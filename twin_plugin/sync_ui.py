@@ -1,7 +1,30 @@
 # coding: utf-8
+import json
+import os
 import time
 
 import cerebro
+
+#region agent log
+_DEBUG_LOG = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "debug-fa4487.log"))
+
+
+def _agent_log(hypothesis_id, location, message, data=None, run_id="pre-fix"):
+    try:
+        entry = {
+            "sessionId": "fa4487",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data or {},
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(_DEBUG_LOG, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+#endregion
 
 from PyQt6.QtWidgets import (
     QApplication,
@@ -644,11 +667,55 @@ def sync_ui():
                     return candidate
             return None
 
+        def _branch_item_for_cerebro_id(self, cerebro_id):
+            """Tree item for id, or nearest loaded branch ancestor."""
+            item = self._left_tree_item_for_id(cerebro_id)
+            if item is not None:
+                return item
+            node = self._nodes_by_id.get(cerebro_id)
+            if node is None:
+                tid = self._normalize_task_id(cerebro_id)
+                for key, candidate in self._nodes_by_id.items():
+                    if self._normalize_task_id(key) == tid:
+                        node = candidate
+                        break
+            visited = set()
+            while node:
+                nid = node.get("id")
+                if nid in visited:
+                    break
+                visited.add(nid)
+                item = self._left_tree_item_for_id(nid)
+                if item is not None:
+                    return item
+                parent_id = node.get("cerebro_parent_id")
+                node = (
+                    self._nodes_by_id.get(parent_id)
+                    if parent_id is not None
+                    else None
+                )
+            return None
+
+        def _ids_to_restore(self):
+            ids = []
+            seen = set()
+            for raw in self._settings.get("checked_cerebro_task_ids") or []:
+                tid = self._normalize_task_id(raw)
+                if tid is not None and tid not in seen:
+                    seen.add(tid)
+                    ids.append(tid)
+            for raw in (self._settings.get("task_map") or {}):
+                tid = self._normalize_task_id(raw)
+                if tid is not None and tid not in seen:
+                    seen.add(tid)
+                    ids.append(tid)
+            return ids
+
         def _reveal_checked_left_items(self, task_ids):
             """Expand ancestors and scroll to first checked item (deferred)."""
             items = []
             for tid in task_ids:
-                item = self._left_tree_item_for_id(tid)
+                item = self._branch_item_for_cerebro_id(tid)
                 if item is not None:
                     items.append(item)
             if not items:
@@ -667,24 +734,55 @@ def sync_ui():
             )
 
         def _restore_checked_items(self, reveal_after=False):
-            raw = self._settings.get("checked_cerebro_task_ids") or []
-            saved = [
-                tid
-                for tid in (self._normalize_task_id(x) for x in raw)
-                if tid is not None
-            ]
+            saved = self._ids_to_restore()
+            #region agent log
+            _agent_log(
+                "B",
+                "sync_ui._restore_checked_items",
+                "restore start",
+                {
+                    "checkedSaved": len(self._settings.get("checked_cerebro_task_ids") or []),
+                    "taskMapKeys": len(self._settings.get("task_map") or {}),
+                    "candidateIds": len(saved),
+                    "treeItems": len(self._items_by_id),
+                    "cerebroLoadDone": self._cerebro_load_done,
+                },
+            )
+            #endregion
             if not saved:
                 return
             self._restoring_checks = True
             self.left_tree.blockSignals(True)
+            restored = 0
+            missing = 0
+            items_to_check = []
+            seen_items = set()
             try:
                 for tid in saved:
-                    item = self._left_tree_item_for_id(tid)
-                    if item is not None:
-                        item.setCheckState(0, Qt.CheckState.Checked)
+                    item = self._branch_item_for_cerebro_id(tid)
+                    if item is None:
+                        missing += 1
+                        continue
+                    key = id(item)
+                    if key in seen_items:
+                        continue
+                    seen_items.add(key)
+                    items_to_check.append(item)
+                for item in items_to_check:
+                    item.setCheckState(0, Qt.CheckState.Checked)
+                    self._set_children_check_state(item, Qt.CheckState.Checked)
+                    restored += 1
             finally:
                 self.left_tree.blockSignals(False)
                 self._restoring_checks = False
+            #region agent log
+            _agent_log(
+                "B",
+                "sync_ui._restore_checked_items",
+                "restore done",
+                {"restored": restored, "missing": missing},
+            )
+            #endregion
 
             if reveal_after:
                 QTimer.singleShot(0, lambda ids=list(saved): self._reveal_checked_left_items(ids))
@@ -727,7 +825,19 @@ def sync_ui():
             return [self._nodes_by_id[i] for i in ids if i in self._nodes_by_id]
 
         def _persist_settings(self):
-            self._settings["checked_cerebro_task_ids"] = self._collect_checked_ids()
+            if self._cerebro_load_done:
+                self._settings["checked_cerebro_task_ids"] = self._collect_checked_ids()
+            #region agent log
+            _agent_log(
+                "C",
+                "sync_ui._persist_settings",
+                "persist settings",
+                {
+                    "cerebroLoadDone": self._cerebro_load_done,
+                    "checkedCount": len(self._settings.get("checked_cerebro_task_ids") or []),
+                },
+            )
+            #endregion
             sync_settings.save(self._settings)
 
         def open_settings(self):

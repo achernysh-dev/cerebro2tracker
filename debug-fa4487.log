@@ -1,0 +1,3 @@
+{"sessionId": "fa4487", "runId": "pre-fix", "hypothesisId": "B", "location": "sync_ui._restore_checked_items", "message": "restore start", "data": {"checkedSaved": 0, "taskMapKeys": 915, "candidateIds": 915, "treeItems": 181, "cerebroLoadDone": true}, "timestamp": 1781692255564}
+{"sessionId": "fa4487", "runId": "pre-fix", "hypothesisId": "B", "location": "sync_ui._restore_checked_items", "message": "restore done", "data": {"restored": 178, "missing": 737}, "timestamp": 1781692255637}
+{"sessionId": "fa4487", "runId": "pre-fix", "hypothesisId": "C", "location": "sync_ui._persist_settings", "message": "persist settings", "data": {"cerebroLoadDone": true, "checkedCount": 178}, "timestamp": 1781692325662}
