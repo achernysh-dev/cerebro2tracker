@@ -13,11 +13,115 @@ from .tracker_client import make_client_from_settings
 from .sync_settings import task_map_issue_key, tracker_issue_url
 
 
+_CYRILLIC_TRANSLIT_SEQ = (
+    ("щ", "shch"),
+    ("Щ", "SHCH"),
+    ("ш", "sh"),
+    ("Ш", "SH"),
+    ("ч", "ch"),
+    ("Ч", "CH"),
+    ("ж", "zh"),
+    ("Ж", "ZH"),
+    ("ю", "yu"),
+    ("Ю", "YU"),
+    ("я", "ya"),
+    ("Я", "YA"),
+    ("ё", "yo"),
+    ("Ё", "YO"),
+    ("й", "y"),
+    ("Й", "Y"),
+    ("х", "kh"),
+    ("Х", "KH"),
+    ("ц", "ts"),
+    ("Ц", "TS"),
+    ("ъ", ""),
+    ("Ъ", ""),
+    ("ь", ""),
+    ("Ь", ""),
+    ("а", "a"),
+    ("А", "A"),
+    ("б", "b"),
+    ("Б", "B"),
+    ("в", "v"),
+    ("В", "V"),
+    ("г", "g"),
+    ("Г", "G"),
+    ("д", "d"),
+    ("Д", "D"),
+    ("е", "e"),
+    ("Е", "E"),
+    ("з", "z"),
+    ("З", "Z"),
+    ("и", "i"),
+    ("И", "I"),
+    ("к", "k"),
+    ("К", "K"),
+    ("л", "l"),
+    ("Л", "L"),
+    ("м", "m"),
+    ("М", "M"),
+    ("н", "n"),
+    ("Н", "N"),
+    ("о", "o"),
+    ("О", "O"),
+    ("п", "p"),
+    ("П", "P"),
+    ("р", "r"),
+    ("Р", "R"),
+    ("с", "s"),
+    ("С", "S"),
+    ("т", "t"),
+    ("Т", "T"),
+    ("у", "u"),
+    ("У", "U"),
+    ("ф", "f"),
+    ("Ф", "F"),
+    ("ы", "y"),
+    ("Ы", "Y"),
+    ("э", "e"),
+    ("Э", "E"),
+)
+
+
+def _has_cyrillic(text):
+    return bool(re.search(r"[\u0400-\u04FF]", text or ""))
+
+
+def transliterate_cyrillic_to_latin(text):
+    if not text:
+        return ""
+    out = []
+    i = 0
+    while i < len(text):
+        for src, dst in _CYRILLIC_TRANSLIT_SEQ:
+            if text.startswith(src, i):
+                out.append(dst)
+                i += len(src)
+                break
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def _latin_name_for_queue(project_name):
+    name = project_name or ""
+    if _has_cyrillic(name):
+        return transliterate_cyrillic_to_latin(name)
+    return name
+
+
+def queue_name_from_project_name(project_name):
+    return "%s Queue" % _latin_name_for_queue(project_name or "Project")
+
+
 def queue_key_from_project_name(project_name):
-    letters = re.sub(r"[^A-Za-z]", "", project_name or "")
+    latin = _latin_name_for_queue(project_name)
+    letters = re.sub(r"[^A-Za-z]", "", latin)
     if not letters:
         letters = "CBRO"
-    return letters.upper()[:15]
+    base = letters.upper()[:15]
+    return base
 
 
 def _headers(client):
@@ -142,19 +246,23 @@ def ensure_queue_for_project(client, project_name, cerebro_root_id, settings):
     queue_keys = settings.setdefault("queue_keys", {})
     saved = queue_keys.get(root_key)
 
+    candidates = _unique_queue_key_candidates(project_name)
+    if saved and saved not in candidates:
+        queue_keys.pop(root_key, None)
+        saved = None
+
     if saved:
         queue = find_queue(client, saved)
         if queue:
             return saved, queue
         queue_keys.pop(root_key, None)
 
-    candidates = _unique_queue_key_candidates(project_name)
     for qkey in candidates:
         queue = find_queue(client, qkey)
         if queue:
             return qkey, queue
 
-    qname = "%s Queue" % project_name
+    qname = queue_name_from_project_name(project_name)
     last_error = None
     for qkey in candidates:
         try:
