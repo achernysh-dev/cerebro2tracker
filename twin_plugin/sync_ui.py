@@ -1,30 +1,7 @@
 # coding: utf-8
-import json
-import os
 import time
 
 import cerebro
-
-#region agent log
-_DEBUG_LOG = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "debug-fa4487.log"))
-
-
-def _agent_log(hypothesis_id, location, message, data=None, run_id="pre-fix"):
-    try:
-        entry = {
-            "sessionId": "fa4487",
-            "runId": run_id,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(_DEBUG_LOG, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-#endregion
 
 from PyQt6.QtWidgets import (
     QApplication,
@@ -704,12 +681,34 @@ def sync_ui():
                 if tid is not None and tid not in seen:
                     seen.add(tid)
                     ids.append(tid)
-            for raw in (self._settings.get("task_map") or {}):
-                tid = self._normalize_task_id(raw)
-                if tid is not None and tid not in seen:
-                    seen.add(tid)
-                    ids.append(tid)
             return ids
+
+        def _topmost_checked_ids(self):
+            """Topmost checked branches only (exclude checked descendants)."""
+            all_checked = self._collect_checked_ids()
+            checked_set = {self._normalize_task_id(x) for x in all_checked}
+            checked_set.discard(None)
+            topmost = []
+            for tid in all_checked:
+                norm = self._normalize_task_id(tid)
+                node = self._nodes_by_id.get(tid)
+                if node is None:
+                    for key, candidate in self._nodes_by_id.items():
+                        if self._normalize_task_id(key) == norm:
+                            node = candidate
+                            break
+                pid = node.get("cerebro_parent_id") if node else None
+                parent_checked = (
+                    pid is not None
+                    and self._normalize_task_id(pid) in checked_set
+                )
+                if not parent_checked:
+                    topmost.append(tid)
+            return topmost
+
+        def _save_checked_selection(self):
+            self._settings["checked_cerebro_task_ids"] = self._topmost_checked_ids()
+            sync_settings.save(self._settings)
 
         def _reveal_checked_left_items(self, task_ids):
             """Expand ancestors and scroll to first checked item (deferred)."""
@@ -735,54 +734,24 @@ def sync_ui():
 
         def _restore_checked_items(self, reveal_after=False):
             saved = self._ids_to_restore()
-            #region agent log
-            _agent_log(
-                "B",
-                "sync_ui._restore_checked_items",
-                "restore start",
-                {
-                    "checkedSaved": len(self._settings.get("checked_cerebro_task_ids") or []),
-                    "taskMapKeys": len(self._settings.get("task_map") or {}),
-                    "candidateIds": len(saved),
-                    "treeItems": len(self._items_by_id),
-                    "cerebroLoadDone": self._cerebro_load_done,
-                },
-            )
-            #endregion
-            if not saved:
+            saved_set = {self._normalize_task_id(x) for x in saved}
+            saved_set.discard(None)
+            if not saved_set:
                 return
             self._restoring_checks = True
             self.left_tree.blockSignals(True)
-            restored = 0
-            missing = 0
-            items_to_check = []
-            seen_items = set()
             try:
                 for tid in saved:
-                    item = self._branch_item_for_cerebro_id(tid)
+                    item = self._left_tree_item_for_id(tid)
                     if item is None:
-                        missing += 1
+                        item = self._branch_item_for_cerebro_id(tid)
+                    if item is None:
                         continue
-                    key = id(item)
-                    if key in seen_items:
-                        continue
-                    seen_items.add(key)
-                    items_to_check.append(item)
-                for item in items_to_check:
                     item.setCheckState(0, Qt.CheckState.Checked)
                     self._set_children_check_state(item, Qt.CheckState.Checked)
-                    restored += 1
             finally:
                 self.left_tree.blockSignals(False)
                 self._restoring_checks = False
-            #region agent log
-            _agent_log(
-                "B",
-                "sync_ui._restore_checked_items",
-                "restore done",
-                {"restored": restored, "missing": missing},
-            )
-            #endregion
 
             if reveal_after:
                 QTimer.singleShot(0, lambda ids=list(saved): self._reveal_checked_left_items(ids))
@@ -826,18 +795,7 @@ def sync_ui():
 
         def _persist_settings(self):
             if self._cerebro_load_done:
-                self._settings["checked_cerebro_task_ids"] = self._collect_checked_ids()
-            #region agent log
-            _agent_log(
-                "C",
-                "sync_ui._persist_settings",
-                "persist settings",
-                {
-                    "cerebroLoadDone": self._cerebro_load_done,
-                    "checkedCount": len(self._settings.get("checked_cerebro_task_ids") or []),
-                },
-            )
-            #endregion
+                self._settings["checked_cerebro_task_ids"] = self._topmost_checked_ids()
             sync_settings.save(self._settings)
 
         def open_settings(self):
@@ -912,6 +870,7 @@ def sync_ui():
             if confirm != QMessageBox.StandardButton.Yes:
                 return
 
+            self._save_checked_selection()
             self.sync_button.setEnabled(False)
             self._sync_runner = SyncRunner(
                 self._settings,
