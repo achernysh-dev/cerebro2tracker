@@ -20,9 +20,33 @@ DEFAULT_SETTINGS = {
     "selected_tracker_portfolio_id": "",
     "checked_cerebro_task_ids": [],
     "task_map": {},
-    "queue_keys": {},
+    "cerebro_queue_key": "",
+    "cerebro_server_id": "104",
     "status_map": {},
 }
+
+
+DEFAULT_CEREBRO_SERVER_ID = 104
+
+
+def normalize_cerebro_server_id(raw):
+    """Return cerebro_server_id as a normalized string for storage."""
+    if raw is None or raw == "":
+        return str(DEFAULT_CEREBRO_SERVER_ID)
+    return str(raw).strip() or str(DEFAULT_CEREBRO_SERVER_ID)
+
+
+def cerebro_server_id(settings=None):
+    """Parse cerebro_server_id from settings; default 104."""
+    s = settings or load()
+    raw = s.get("cerebro_server_id")
+    try:
+        value = int(normalize_cerebro_server_id(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_CEREBRO_SERVER_ID
+    if value < 1:
+        return DEFAULT_CEREBRO_SERVER_ID
+    return value
 
 
 def get_package_dir():
@@ -75,7 +99,7 @@ def _settings_has_user_data(path):
             return True
         if data.get("checked_cerebro_task_ids"):
             return True
-        if data.get("queue_keys"):
+        if data.get("cerebro_queue_key"):
             return True
     except Exception:
         pass
@@ -236,8 +260,8 @@ def load():
         int(x) for x in (data.get("checked_cerebro_task_ids") or [])
     ]
     data["task_map"] = normalize_task_map(data.get("task_map") or {})
-    queue_keys = data.get("queue_keys") or {}
-    data["queue_keys"] = {str(k): v for k, v in queue_keys.items()}
+    data["cerebro_queue_key"] = str(data.get("cerebro_queue_key") or "").strip()
+    data["cerebro_server_id"] = normalize_cerebro_server_id(data.get("cerebro_server_id"))
     return data
 
 
@@ -248,7 +272,8 @@ def save(settings):
     out.update(settings or {})
     out["checked_cerebro_task_ids"] = list(out.get("checked_cerebro_task_ids") or [])
     out["task_map"] = normalize_task_map(out.get("task_map") or {})
-    out["queue_keys"] = {str(k): v for k, v in (out.get("queue_keys") or {}).items()}
+    out["cerebro_queue_key"] = str(out.get("cerebro_queue_key") or "").strip()
+    out["cerebro_server_id"] = normalize_cerebro_server_id(out.get("cerebro_server_id"))
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=2)
     return path

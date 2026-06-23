@@ -1,6 +1,5 @@
 # coding: utf-8
 """Sync selected Cerebro tasks to Yandex Tracker (main-thread incremental runner)."""
-import re
 from datetime import date, datetime, timedelta
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
@@ -13,115 +12,8 @@ from .tracker_client import make_client_from_settings
 from .sync_settings import task_map_issue_key, tracker_issue_url
 
 
-_CYRILLIC_TRANSLIT_SEQ = (
-    ("щ", "shch"),
-    ("Щ", "SHCH"),
-    ("ш", "sh"),
-    ("Ш", "SH"),
-    ("ч", "ch"),
-    ("Ч", "CH"),
-    ("ж", "zh"),
-    ("Ж", "ZH"),
-    ("ю", "yu"),
-    ("Ю", "YU"),
-    ("я", "ya"),
-    ("Я", "YA"),
-    ("ё", "yo"),
-    ("Ё", "YO"),
-    ("й", "y"),
-    ("Й", "Y"),
-    ("х", "kh"),
-    ("Х", "KH"),
-    ("ц", "ts"),
-    ("Ц", "TS"),
-    ("ъ", ""),
-    ("Ъ", ""),
-    ("ь", ""),
-    ("Ь", ""),
-    ("а", "a"),
-    ("А", "A"),
-    ("б", "b"),
-    ("Б", "B"),
-    ("в", "v"),
-    ("В", "V"),
-    ("г", "g"),
-    ("Г", "G"),
-    ("д", "d"),
-    ("Д", "D"),
-    ("е", "e"),
-    ("Е", "E"),
-    ("з", "z"),
-    ("З", "Z"),
-    ("и", "i"),
-    ("И", "I"),
-    ("к", "k"),
-    ("К", "K"),
-    ("л", "l"),
-    ("Л", "L"),
-    ("м", "m"),
-    ("М", "M"),
-    ("н", "n"),
-    ("Н", "N"),
-    ("о", "o"),
-    ("О", "O"),
-    ("п", "p"),
-    ("П", "P"),
-    ("р", "r"),
-    ("Р", "R"),
-    ("с", "s"),
-    ("С", "S"),
-    ("т", "t"),
-    ("Т", "T"),
-    ("у", "u"),
-    ("У", "U"),
-    ("ф", "f"),
-    ("Ф", "F"),
-    ("ы", "y"),
-    ("Ы", "Y"),
-    ("э", "e"),
-    ("Э", "E"),
-)
-
-
-def _has_cyrillic(text):
-    return bool(re.search(r"[\u0400-\u04FF]", text or ""))
-
-
-def transliterate_cyrillic_to_latin(text):
-    if not text:
-        return ""
-    out = []
-    i = 0
-    while i < len(text):
-        for src, dst in _CYRILLIC_TRANSLIT_SEQ:
-            if text.startswith(src, i):
-                out.append(dst)
-                i += len(src)
-                break
-        else:
-            out.append(text[i])
-            i += 1
-    return "".join(out)
-
-
-def _latin_name_for_queue(project_name):
-    name = project_name or ""
-    if _has_cyrillic(name):
-        return transliterate_cyrillic_to_latin(name)
-    return name
-
-
-def queue_name_from_project_name(project_name):
-    return "%s Queue" % _latin_name_for_queue(project_name or "Project")
-
-
-def queue_key_from_project_name(project_name):
-    latin = _latin_name_for_queue(project_name)
-    letters = re.sub(r"[^A-Za-z]", "", latin)
-    if not letters:
-        letters = "CBRO"
-    base = letters.upper()[:15]
-    return base
+CEREBRO_QUEUE_KEY = "CEBRO"
+CEREBRO_QUEUE_NAME = "Cerebro_queue"
 
 
 def _headers(client):
@@ -215,69 +107,32 @@ def find_queue(client, queue_key):
     raise RuntimeError("Queue lookup failed: %s %s" % (resp.status_code, resp.text))
 
 
-def _queue_key_candidates(project_name, saved_key=None):
-    seen = set()
-    if saved_key:
-        seen.add(saved_key)
-        yield saved_key
-    base = queue_key_from_project_name(project_name)
-    if base not in seen:
-        seen.add(base)
-        yield base
-    for suffix in ("CB", "CBR", "SYN", "S2", "Q2", "Q3"):
-        alt = (base[: 15 - len(suffix)] + suffix)[:15]
-        if alt not in seen:
-            seen.add(alt)
-            yield alt
-    for i in range(1, 6):
-        alt = ("%s%d" % (base[: max(1, 14 - len(str(i)))], i))[:15]
-        if alt not in seen:
-            seen.add(alt)
-            yield alt
-
-
-def _unique_queue_key_candidates(project_name, saved_key=None):
-    return list(dict.fromkeys(_queue_key_candidates(project_name, saved_key)))
-
-
-def ensure_queue_for_project(client, project_name, cerebro_root_id, settings):
-    """Find or create a non-deleted queue the user can write to."""
-    root_key = str(cerebro_root_id)
-    queue_keys = settings.setdefault("queue_keys", {})
-    saved = queue_keys.get(root_key)
-
-    candidates = _unique_queue_key_candidates(project_name)
-    if saved and saved not in candidates:
-        queue_keys.pop(root_key, None)
-        saved = None
-
+def ensure_cerebro_queue(client, settings):
+    """Find or create the single shared queue for all synced Cerebro projects."""
+    saved = (settings.get("cerebro_queue_key") or "").strip()
+    if saved != CEREBRO_QUEUE_KEY:
+        if saved:
+            settings.pop("cerebro_queue_key", None)
+        saved = ""
     if saved:
         queue = find_queue(client, saved)
         if queue:
+            settings["cerebro_queue_key"] = saved
             return saved, queue
-        queue_keys.pop(root_key, None)
 
-    for qkey in candidates:
-        queue = find_queue(client, qkey)
-        if queue:
-            return qkey, queue
+    queue = find_queue(client, CEREBRO_QUEUE_KEY)
+    if queue:
+        settings["cerebro_queue_key"] = CEREBRO_QUEUE_KEY
+        return CEREBRO_QUEUE_KEY, queue
 
-    qname = queue_name_from_project_name(project_name)
-    last_error = None
-    for qkey in candidates:
-        try:
-            queue = create_queue(client, qkey, qname, project_name)
-            return qkey, queue
-        except RuntimeError as ex:
-            last_error = ex
-            continue
-
-    detail = str(last_error) if last_error else "no candidate keys left"
-    raise RuntimeError(
-        "Could not find or create a Tracker queue for project %r. %s. "
-        "Create a queue manually in Tracker or ask the queue owner for access."
-        % (project_name, detail)
+    queue = create_queue(
+        client,
+        CEREBRO_QUEUE_KEY,
+        CEREBRO_QUEUE_NAME,
+        "Synced from Cerebro",
     )
+    settings["cerebro_queue_key"] = CEREBRO_QUEUE_KEY
+    return CEREBRO_QUEUE_KEY, queue
 
 
 def _lead_login(client):
@@ -287,12 +142,12 @@ def _lead_login(client):
     return getattr(me, "login", None) or getattr(me, "id", None)
 
 
-def create_queue(client, queue_key, queue_name, project_name):
+def create_queue(client, queue_key, queue_name, description):
     url = client._connection.build_url("/v3/queues/")
     payload = {
         "key": queue_key,
         "name": queue_name,
-        "description": "Synced from Cerebro project: %s" % project_name,
+        "description": description,
         "lead": _lead_login(client),
         "defaultType": "task",
         "defaultPriority": "normal",
@@ -311,6 +166,11 @@ def create_queue(client, queue_key, queue_name, project_name):
         again = find_queue(client, queue_key)
         if again:
             return again
+        raise RuntimeError(
+            "Queue key %r already exists in Tracker but is not visible to your account "
+            "(no read access or another organization). Ask the queue owner for access."
+            % queue_key
+        )
     if resp.status_code >= 400:
         raise RuntimeError("Create queue failed: %s %s" % (resp.status_code, resp.text))
     return resp.json()
@@ -347,11 +207,22 @@ def _parse_date(value):
         return None
 
 
-def _issue_description(cerebro_id, cerebro_path, tracker_url=None):
+def cerebro_browse_url(task_id, server_id):
+    tid = "%s-%s" % (task_id, server_id)
+    return (
+        "https://apps.cerebrohq.com/app/browse/%s?tid=%s&app=desktop" % (tid, tid)
+    )
+
+
+def _issue_description(cerebro_id, cerebro_path, tracker_url=None, server_id=None):
+    if server_id is None:
+        server_id = sync_settings.DEFAULT_CEREBRO_SERVER_ID
+    browse_url = cerebro_browse_url(cerebro_id, server_id)
     lines = [
         "Synced from Cerebro.",
         "%s%s" % (CEREBRO_ID_MARKER, cerebro_id),
         "%s%s" % (CEREBRO_PATH_MARKER, cerebro_path or ""),
+        "Cerebro: [Open in Cerebro](%s)" % browse_url,
     ]
     if tracker_url:
         lines.append("Tracker: %s" % tracker_url)
@@ -437,7 +308,7 @@ def _issue_in_queue(client, issue_key, queue_key):
 
 def _invalidate_stale_issue_mapping(task_map, cerebro_id, issue_key, reason):
     _sync_log(
-        "%s: stale mapping for Cerebro %s (%s) — will sync in current project queue"
+        "%s: stale mapping for Cerebro %s (%s) — will sync in shared Cerebro queue"
         % (issue_key, cerebro_id, reason)
     )
     task_map.pop(cerebro_id, None)
@@ -785,7 +656,10 @@ def create_or_update_issue(
     sibling_index=0,
     rollup_index=None,
     status_map=None,
+    server_id=None,
 ):
+    if server_id is None:
+        server_id = sync_settings.DEFAULT_CEREBRO_SERVER_ID
     node = enrich_node(node, rollup_index=rollup_index, nodes_by_id=nodes_by_id)
     st = node.get("status") or {}
     rollup = node.get("rollup")
@@ -850,7 +724,9 @@ def create_or_update_issue(
         issue_key = issue.key
         tracker_url = tracker_issue_url(issue_key)
         updates = {
-            "description": _issue_description(cerebro_id, cerebro_path, tracker_url),
+            "description": _issue_description(
+                cerebro_id, cerebro_path, tracker_url, server_id=server_id
+            ),
             "start": start_s,
             "deadline": finish_s,
             "end": finish_s,
@@ -882,6 +758,7 @@ def create_or_update_issue(
                 sibling_index,
                 rollup_index,
                 status_map=status_map,
+                server_id=server_id,
             )
         _apply_cerebro_tracker_fields(
             client,
@@ -894,7 +771,9 @@ def create_or_update_issue(
         return issue_key, False, tracker_url
 
     tracker_url_placeholder = None
-    description = _issue_description(cerebro_id, cerebro_path, tracker_url_placeholder)
+    description = _issue_description(
+        cerebro_id, cerebro_path, tracker_url_placeholder, server_id=server_id
+    )
     kwargs = {
         "queue": queue_key,
         "summary": summary,
@@ -912,7 +791,11 @@ def create_or_update_issue(
     issue = client.issues.create(**kwargs)
     issue_key = issue.key
     tracker_url = tracker_issue_url(issue_key)
-    issue.update(description=_issue_description(cerebro_id, cerebro_path, tracker_url))
+    issue.update(
+        description=_issue_description(
+            cerebro_id, cerebro_path, tracker_url, server_id=server_id
+        )
+    )
     _apply_cerebro_tracker_fields(
         client,
         issue_key,
@@ -931,7 +814,7 @@ def collect_sync_jobs(checked_nodes, nodes_by_id, root_ids=None):
     Hidden leaf tasks (cut from UI) are NOT synced.
 
     Each topmost checked node (no checked parent) becomes a Tracker *project*.
-    Other checked nodes under it become issues in that project's queue.
+    Other checked nodes under it become issues in the shared Cerebro queue.
     """
     checked_ids = {n["id"] for n in checked_nodes}
     project_root_ids = _project_roots(checked_nodes, nodes_by_id)
@@ -1086,6 +969,7 @@ class SyncRunner(QObject):
         self._abort_sync = False
         self._rollup_index = {}
         self._status_map = {}
+        self._cerebro_queue_key = None
 
     def start(self):
         client, err = make_client_from_settings(self._settings)
@@ -1106,6 +990,13 @@ class SyncRunner(QObject):
 
     def stop(self):
         self._timer.stop()
+
+    def _ensure_shared_queue(self):
+        if self._cerebro_queue_key:
+            return self._cerebro_queue_key
+        qkey, _queue = ensure_cerebro_queue(self._client, self._settings)
+        self._cerebro_queue_key = qkey
+        return qkey
 
     def _tick(self):
         if self._abort_sync or self._index >= len(self._jobs):
@@ -1168,12 +1059,7 @@ class SyncRunner(QObject):
                 project = create_entity_project(client, project_name, portfolio_id)
                 self._stats["projects"] += 1
             short_id = project.get("shortId")
-            qkey, queue = ensure_queue_for_project(
-                client, project_name, root_id, self._settings
-            )
-            if not self._settings.get("queue_keys"):
-                self._settings["queue_keys"] = {}
-            self._settings["queue_keys"][str(root_id)] = qkey
+            qkey = self._ensure_shared_queue()
             self._project_ctx[root_id] = {
                 "queue_key": qkey,
                 "project_short_id": short_id,
@@ -1212,6 +1098,7 @@ class SyncRunner(QObject):
             job.get("sibling_index", 0),
             rollup_index=self._rollup_index,
             status_map=self._status_map,
+            server_id=sync_settings.cerebro_server_id(self._settings),
         )
         self._issue_keys[node["id"]] = key
         self._issue_links[str(node["id"])] = task_map.get(str(node["id"])) or {

@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QObject, QTimer, pyqtSignal
+from PyQt6.QtGui import QIntValidator
 
 from .populate_cerebro_structure import fetch_children_branches, task_summary_light
 from . import sync_settings
@@ -260,6 +261,15 @@ class SettingsDialog(QDialog):
         layout.addRow("Org ID type:", self.org_id_type_combo)
         layout.addRow("Org ID:", self.org_id_input)
 
+        self.server_id_input = QLineEdit()
+        self.server_id_input.setValidator(QIntValidator(1, 999999, self))
+        self.server_id_input.setText(
+            sync_settings.normalize_cerebro_server_id(
+                self._settings.get("cerebro_server_id")
+            )
+        )
+        layout.addRow("Server id:", self.server_id_input)
+
         self.save_button = QPushButton("Save")
         self.save_button.clicked.connect(self.accept)
         layout.addRow(self.save_button)
@@ -291,6 +301,9 @@ class SettingsDialog(QDialog):
             "tracker_org_id_type": org_type,
             "tracker_cloud_org_id": (self._settings.get("tracker_cloud_org_id") or "").strip(),
             "tracker_org_id": (self._settings.get("tracker_org_id") or "").strip(),
+            "cerebro_server_id": sync_settings.normalize_cerebro_server_id(
+                self.server_id_input.text().strip()
+            ),
         }
 
 
@@ -816,6 +829,7 @@ def sync_ui():
                 self._settings["tracker_org_id_type"] = values["tracker_org_id_type"]
                 self._settings["tracker_cloud_org_id"] = values["tracker_cloud_org_id"]
                 self._settings["tracker_org_id"] = values["tracker_org_id"]
+                self._settings["cerebro_server_id"] = values["cerebro_server_id"]
                 if creds_changed:
                     self._settings["parent_portfolio_id"] = ""
                     self._settings["selected_tracker_portfolio_id"] = ""
